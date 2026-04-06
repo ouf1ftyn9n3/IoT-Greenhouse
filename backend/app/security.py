@@ -25,15 +25,55 @@ def get_password_hash(password: str) -> str:
 
 
 def create_access_token(subject: str, expires_delta: Optional[timedelta] = None) -> str:
-    to_encode = {"sub": subject}
+    to_encode = {"sub": subject, "type": "access"}
     expire = datetime.utcnow() + (
         expires_delta or timedelta(minutes=settings.access_token_expire_minutes)
     )
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, settings.jwt_secret, algorithm=settings.jwt_algorithm)
 
+def create_refresh_token(subject: str, expires_delta: Optional[timedelta] = None) -> str:
+    """
+        Создает refresh токен для обновления access токена
+        Args:
+            subject: email пользователя
+            expires_delta: время жизни токена
+        Returns:
+            str: refresh токен
+    """
+    to_encode = {"sub": subject, "type": "refresh"}
+    expire = datetime.utcnow() + (
+        expires_delta or timedelta(minutes=settings.refresh_token_expire_minutes)
+    )
+    to_encode.update({"exp": expire})
+    return jwt.encode(to_encode, settings.jwt_secret, algorithm=settings.jwt_algorithm)
 
 def decode_access_token(token: str) -> str:
+    try:
+        payload = jwt.decode(
+            token, settings.jwt_secret, algorithms=[settings.jwt_algorithm]
+        )
+        if payload.get("type") != "access":
+            raise JWTError("Token is not an access token")
+        subject: Optional[str] = payload.get("sub")
+        if subject is None:
+            raise JWTError("Subject not found in token")
+        return subject
+    except JWTError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        ) from exc
+    
+def decode_refresh_token(token: str) -> str:
+    """
+        Декодирует refresh токен и возвращает email пользователя
+        Args:
+            token: refresh токен
+        Returns:
+            str: email пользователя
+    """
     try:
         payload = jwt.decode(
             token, settings.jwt_secret, algorithms=[settings.jwt_algorithm]
@@ -41,6 +81,8 @@ def decode_access_token(token: str) -> str:
         subject: Optional[str] = payload.get("sub")
         if subject is None:
             raise JWTError("Subject not found in token")
+        if payload.get("type") != "refresh":
+            raise JWTError("Token is not a refresh token")
         return subject
     except JWTError as exc:
         raise HTTPException(
